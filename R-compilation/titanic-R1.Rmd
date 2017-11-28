@@ -1,0 +1,273 @@
+---
+title: "titanic"
+output: titanic-R
+---
+
+#Package
+```{r}
+# Load packages
+library('ggplot2') # visualization
+library('scales') # visualization
+library('dplyr') # data manipulation
+# library('randomForest') # classification algorithm
+library('data.table')#dt
+library('plotly')
+library('highcharter')
+require(corrplot)
+```
+
+##plotly margin
+
+```{r}
+# Margin for btm padding for plotly
+m <- list(
+  b = 150,
+  pad = 4
+)
+```
+
+
+#Read Data
+```{r}
+train <- data.table(read.csv('../input/train.csv', stringsAsFactors = F, na.strings=""))
+test  <- data.table(read.csv('../input/test.csv', stringsAsFactors = F, na.strings=""))
+
+full  <- bind_rows(train, test) # bind training & test data
+
+full<- data.table(rbind(train[,Identity:="train"], test[,Identity:="test"], fill = T))
+full$Identity<- as.factor(full$Identity)
+
+```
+
+
+
+# Glimpse, Summary, Column Name
+Making column name more sensible and intuitive
+```{r}
+# setnames(full, c("Pclass", "SibSp", "Parch"),c("PassengerClass", "N_SibSpouse", "N_ParentsChild"))
+
+glimpse(full)
+
+summary(full)
+
+# names_factors=c('PassengerClass', 'Sex', 'Embarked')
+# for (col in names_factors) set(full, j=col, value=as.factor(full[[col]])) #changing selected column types
+# http://stackoverflow.com/questions/7813578/convert-column-classes-in-data-table?rq=1#comment31200110_20808945
+
+## Other methods to change column types in data table
+# full <- full[, PassengerClass:=as.factor(PassengerClass), ']
+# dtnew <- dt[, lapply(.SD, as.character), by=ID]
+
+## Method to identify NA if it is not specified in read.csv
+# full[,Embarked==""] <- NA
+```
+
+
+
+#Missing values
+
+
+
+```{r}
+# Exploring NA values
+fullNA.dt<-full %>%
+  .[,list(
+    # Numbers = .N,
+          "% Pclass" = sum(!is.na(Pclass))/.N,
+          "% Name" = sum(!is.na(Name))/.N,
+          "% Sex" = sum(!is.na(Sex))/.N,
+          "% Age" = sum(!is.na(Age))/.N,
+          "% SibSp" = sum(!is.na(SibSp))/.N,
+          "% Parch" = sum(!is.na(Parch))/.N,
+          "% Ticket" = sum(!is.na(Ticket))/.N,
+          "% Fare" = sum(!is.na(Fare))/.N,
+          "% Cabin" = sum(!is.na(Cabin))/.N,
+          "% Embarked" = sum(!is.na(Embarked))/.N
+          ),
+    by=list(Survived)]
+
+
+
+fullNA_melt.dt<- fullNA.dt %>%
+  melt(., id = 1) 
+
+# plot
+fullNA_melt.dt$Survived[is.na(fullNA_melt.dt$Survived)]  <- 'U'
+fullNA_melt.dt <- fullNA_melt.dt[, Survived:=as.character(Survived)]
+
+
+fullNA_melt.dt%>%
+  plot_ly(.,
+          x = ~variable,
+          y = ~value,
+          color = ~Survived,
+          name = "Survived",
+          type = "bar"
+  ) %>%
+  layout(margin = m)
+
+
+```
+
+# Title
+Other kernel such as Megan Risdal - Exploring on the Titanic does a good job of explaining this
+https://www.kaggle.com/mrisdal/exploring-survival-on-the-titanic
+Basically, the name column contained title that is associated with social class and thereby survival rate
+```{r}
+# Grab title from passenger names
+full$Title <- gsub('(.*, )|(\\..*)', '', full$Name)
+
+# Show title counts by sex
+table(full$Sex, full$Title)
+
+
+# Titles with very low cell counts to be combined to "rare" level
+rare_title <- c('Dona', 'Lady', 'the Countess','Capt', 'Col', 'Don', 
+                'Dr', 'Major', 'Rev', 'Sir', 'Jonkheer')
+
+# Also reassign mlle, ms, and mme accordingly
+full$Title[full$Title == 'Mlle']        <- 'Miss' 
+full$Title[full$Title == 'Ms']          <- 'Miss'
+full$Title[full$Title == 'Mme']         <- 'Mrs' 
+full$Title[full$Title %in% rare_title]  <- 'Rare Title'
+
+# Show title counts by sex again
+table(full$Sex, full$Title)
+
+# Plotting to visuallise the effect on suvival based on the different in title
+full %>%
+  plot_ly(x = ~Title,
+          color= ~as.factor(Survived),
+             type = "histogram",
+             histnorm = "probability")
+
+#note that survived ~ 2 is NA
+
+full$Title<- as.factor(full$Title)
+```
+
+
+```{r}
+# Show title counts by sex
+# table(train.dt$Title,train.dt$Survived)
+
+Train_Title_Survival.dt<-full[!is.na(Survived)] %>%
+  .[,list(
+     Population = .N,
+     SurviveP = sum((Survived))/.N
+          ),
+    by=list(Title)]%>%
+  # Order the Survival by their mean value
+  .[order(-SurviveP)]
+
+
+
+Train_Title_Survival.dt$Title <- factor(Train_Title_Survival.dt$Title, 
+                                 levels = Train_Title_Survival_order.dt[["Title"]])
+
+
+Train_Title_Survival.dt%>%
+  plot_ly(.,
+          x = ~Title,
+          y = ~SurviveP,
+          color = ~Title,
+          name = "Survived",
+          type = "bar"
+  ) %>%
+  layout(margin = m)
+
+```
+
+# N_Sib&Spouse & N_Parents&Child
+These column's relevence will be explore during fitting with bootstrap
+
+```{r}
+full %>%
+  plot_ly(x = ~SibSp,
+          color= ~as.factor(Survived),
+             type = "histogram",
+             histnorm = "probability")
+
+full %>%
+  plot_ly(x = ~Parch,
+          color= ~as.factor(Survived),
+             type = "histogram",
+             histnorm = "probability")
+
+#note that survived ~ 2 is NA
+
+
+```
+It seems it is helpful to have a fellow family on board while the titanic sink, as those with 2, 3 family members tend to survive. Though, it may be better if these columns are combined as **N_family**
+
+
+## N_family 
+```{r}
+# Create a family size variable including the passenger themselves
+full$Fsize <- full$SibSp + full$Parch + 1
+
+full_Fsize_Survival.dt<-full[!is.na(Survived)]%>%
+  .[,list(
+     Population = .N,
+     SurviveP = sum(Survived)/.N
+          ),
+    by=list(Fsize)]%>%
+  .[order(Fsize)]
+
+full_Fsize_Survival.dt%>%
+  plot_ly(.,
+          x = ~Fsize,
+          y = ~SurviveP,
+          color = ~Population,
+          name = "Survived",
+          type = "bar"
+  ) %>%
+  layout(margin = m)
+```
+
+
+# Age
+There is significant amount of NA in Age column but like sex and titles, it should play a role in determining a person's survival rate.
+```{r}
+# Construct the AgeGroup
+breaks <- c(0,5,18,25,35,45,65,Inf)
+tempt <- full[,list(SurvivedR=mean(as.numeric(Survived), na.rm=TRUE)),
+     by=list(AgeGroup=cut(Age,breaks=breaks))][order(AgeGroup)]
+# Adapted from 
+# https://stackoverflow.com/questions/27107454/r-data-table-group-data-by-custom-range-for-example-18-18-25-65
+
+
+# Plotting the result
+tempt %>%
+  plot_ly(x = ~AgeGroup,
+          y = ~SurvivedR,
+             type = "bar")
+
+# Create a column for AgeGroup
+full[,AgeGroup:=cut(Age,breaks=breaks)]
+
+
+# It seems children are probably prioritized for the rescue effort, while the older cohorts fared worse during titanic
+# maybe using kneighbors to setup AgeGroup might be a better idea
+
+```
+
+## Correlation
+```{r}
+# for correlations to work, the columns should either numerical or categorical(factors)
+
+character_columns<-c("Embarked", "Sex", "Title")
+fct_records
+full[, (character_columns):=lapply(.SD, as.factor), .SDcols= character_columns]
+
+
+full[Identity=="train",]%>%
+  .[, (character_columns):=lapply(.SD, function(x) as.numeric(as.factor(x))), .SDcols= character_columns]%>%
+  #seleciting columns for correlation
+  .[, .(Survived, Pclass, Sex, Age, SibSp, Parch, Embarked, Title)]%>%
+  cor(use="complete.obs")%>%
+  corrplot(type ="lower", diag=FALSE)
+
+install.packages("corrplot")
+```
+
